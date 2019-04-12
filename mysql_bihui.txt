@@ -1,0 +1,389 @@
+
+-- 23章 存储过程
+
+-- mysql创建存储过程
+-- 1、
+DELIMITER //
+CREATE PROCEDURE productpricing1()
+BEGIN 
+	SELECT AVG(prod_price) AS priceaverage
+	FROM products;
+END //
+
+DELIMITER;
+
+CALL productpricing1();
+
+
+
+-- 2、
+
+DELIMITER //
+
+CREATE PROCEDURE productpricing3(
+	OUT p1 DECIMAL(8,2),
+	OUT ph DECIMAL(8,2),
+	OUT pa DECIMAL(8,2)
+)
+BEGIN 
+    SELECT MIN(prod_price)
+    FROM products INTO p1;
+    SELECT MAX(prod_price)
+    FROM products  INTO ph;
+    SELECT AVG(prod_price)
+    INTO pa
+    FROM products;
+END //
+
+DELIMITER;
+
+-- 调用
+CALL productpricing(@pricelow,
+		    @pricehigh,
+		    @priceaverage
+);
+
+SELECT @priceaverage;
+SELECT @pricehigh,@pricelow,@priceaverage;
+
+
+-- 3、
+DELIMITER //
+CREATE PROCEDURE ordertotal(
+	IN onumber INT,
+	OUT ototal DECIMAL(8,2)
+)
+BEGIN
+	SELECT SUM(item_price*quantity)
+	FROM orderitems
+	WHERE order_num=onumber
+	INTO ototal;
+END;
+// DELIMITER
+
+-- 调用
+CALL ordertotal(20005,@total);
+
+SELECT @total;
+
+CALL ordertotal(20009,@total);
+SELECT @total;
+
+SELECT SUM(item_price*quantity) FROM orderitems WHERE order_num=20009;
+/*
+	总结:
+	1、 存储过程就相当于一个有多条sql的集合函数，它是可以被调用的；
+	2、 @代表一个变量；当我们调用存储过程时需要用到；
+	3、 语法：
+		1) in代表调用存储过程时需要将变量传递给存储过程；
+		2) out则代表输出的语句，调用存储过程时要使用@变量名去接收，并赋值给了@变量名；
+		3) into 用于begin end中给sql的变量进行赋值；
+	4、 调用存储过程：
+	    调用存储过程时，变量并不会显示出来，只是将数据封装到了变量中；
+	    需要使用select @变量名去查询；
+*/
+
+-- 4、
+DELIMITER //
+CREATE PROCEDURE ordertotal5(
+	IN onumber INT,
+	IN taxable BOOLEAN,
+	OUT ototal DECIMAL(8,2)
+)COMMENT 'Obtain order total,optionally adding tax'
+BEGIN
+	-- declare variable for total
+	 DECLARE total DECIMAL(8,2);
+	 DECLARE taxrate INT DEFAULT 6;
+	SELECT SUM(item_price*quantity)
+	FROM orderitems
+	WHERE order_num=onumber
+	INTO total;
+	
+	IF taxable THEN
+	   SELECT total+(total/100*taxrate) INTO total;
+	   ELSE 
+	   SELECT 0 INTO total;
+	END IF;
+	SELECT total INTO ototal;
+END; 
+//
+
+-- 调用
+SHOW PROCEDURE STATUS;
+
+CALL ordertotal4(20005,0,@total);
+SELECT @total;
+
+CALL ordertotal2(20005,1,@total);
+SELECT @total;
+
+CALL ordertotal2(20005,5,@total3);
+SELECT @total3;
+
+
+
+-- 第24章：使用游标
+DELIMITER//
+
+CREATE PROCEDURE processorders()
+BEGIN
+	DECLARE ordernumbers CURSOR
+	FOR
+	SELECT order_num FROM orders;
+END;
+//
+DELIMITER
+
+
+
+OPEN ordernumbers;
+
+
+
+DELIMITER //
+
+CREATE PROCEDURE processorders2()
+BEGIN
+	DECLARE ordernumbers CURSOR
+	FOR
+	SELECT order_num FROM orders;
+	
+	OPEN ordernumbers;
+	
+	CLOSE ordernumbers;
+END;
+
+
+DELIMITER //
+
+CREATE PROCEDURE processorders3()
+BEGIN
+	-- Declare local variables
+	DECLARE o INT;
+	
+	-- declare the cursor
+	DECLARE ordernumbers CURSOR
+	FOR
+	SELECT order_num FROM orders;
+	
+	-- open the cursor
+	OPEN ordernumbers;
+	
+	-- get order number
+	FETCH ordernumbers INTO o;
+	
+	-- close the cursor
+	CLOSE ordernumbers;
+END;
+
+DELIMITER //
+CREATE PROCEDURE processorders4()
+BEGIN
+	-- declare local variables
+	DECLARE done BOOLEAN DEFAULT 0;
+	DECLARE o INT;
+	
+	-- declare the cursor
+	DECLARE ordernumbers CURSOR
+	FOR
+	SELECT order_num FROM orders;
+	
+	-- declare continue handler
+	DECLARE CONTINUE HANDLER FOR SQLSTATE '02000' SET done=1;
+	
+	-- open the cursor
+	OPEN ordernumbers;
+	
+	-- loop through all rows
+	REPEAT
+		
+		-- get order number
+		FETCH ordernumbers INTO o;
+		
+	-- end of loop
+	UNTIL done END REPEAT;
+	
+	-- close the cursor
+	CLOSE ordernumbers;
+	
+END;
+
+
+-- 游标最全语法；
+DELIMITER //
+CREATE PROCEDURE processorders8()
+BEGIN
+	-- Declare local variables
+	-- 声明本地变量：done ,o ,t
+	DECLARE done BOOLEAN DEFAULT 0;
+	DECLARE o INT;
+	DECLARE t DECIMAL(8,2);
+	
+	-- 声明游标，查询所有order_num订单编号
+	-- declare the cursor
+	DECLARE ordernumbers CURSOR
+	FOR 
+	SELECT order_num FROM orders;
+	
+	-- 声明continue handler，继续操作
+	-- declare continue handler
+	DECLARE CONTINUE HANDLER FOR SQLSTATE '02000' SET done=1;
+	
+	-- create a table  to store the  results
+	CREATE TABLE IF NOT EXISTS ordertotals 
+		(order_num INT,total DECIMAL(8,2));
+		
+	-- open the cursor
+	OPEN ordernumbers;
+	
+	    -- loop through all rows
+	    REPEAT 
+		-- get order number -- 将游标进行缩写 fetch ... into ... 语法；
+	    FETCH ordernumbers INTO o;
+		-- get the total for this order
+	    CALL ordertotal2(o,1,t);
+		
+		-- insert order and total into ordertotals
+	    INSERT INTO ordertotals(order_num,total)
+	    VALUES(o,t);
+	    
+		-- end of loop
+	    UNTIL done END REPEAT;
+	    
+		-- close the cursor
+	CLOSE ordernumbers;
+	    
+END;
+
+
+CALL processorders8();
+
+SELECT * FROM ordertotals;
+
+
+
+-- 第25章：触发器
+
+-- 增加insert
+CREATE TRIGGER newproduct AFTER INSERT ON products FOR EACH ROW SELECT 'Product added' INTO @aa;
+
+
+
+INSERT INTO products (prod_id,vend_id,prod_price,prod_name) VALUES(1002,2003,3223,'hha');
+
+DELIMITER //
+CREATE TRIGGER neworder AFTER INSERT ON orders
+FOR EACH ROW SELECT NEW .order_num INTO @ee ;
+
+INSERT INTO orders(order_date,cust_id)
+VALUES(NOW(),10001);
+
+-- 使用这个进行查询得到返回结果
+SELECT @ee;
+-- 删除delete
+
+DELIMITER //
+CREATE TRIGGER deleteorder AFTER DELETE ON orders
+FOR EACH ROW 
+BEGIN 
+	INSERT INTO archive_orders(order_num,order_date,cust_id)
+	VALUES(OLD .order_num,OLD .order_date,OLD .cust_id) ;	
+END
+;
+
+CREATE TABLE `archive_orders` (
+  `order_num` INT(11) NOT NULL AUTO_INCREMENT,
+  `order_date` DATETIME NOT NULL,
+  `cust_id` INT(11) DEFAULT NULL,
+  PRIMARY KEY (`order_num`)
+) ENGINE=INNODB AUTO_INCREMENT=20013 DEFAULT CHARSET=utf8;
+
+DELETE FROM orders WHERE  order_num=20023;
+
+
+CREATE TABLE `neworder` (
+  `order_num` INT(11) NOT NULL AUTO_INCREMENT,
+  `order_date` DATETIME NOT NULL,
+  `cust_id` INT(11) DEFAULT NULL,
+  PRIMARY KEY (`order_num`)
+) ENGINE=INNODB AUTO_INCREMENT=20023 DEFAULT CHARSET=utf8;
+
+-- update更新
+CREATE TRIGGER updatevendor BEFORE UPDATE ON vendors
+FOR EACH ROW SET NEW .vend_state = UPPER(NEW .vend_state) ;
+
+
+UPDATE vendors SET vend_name='LT Supplies' WHERE vend_id=100;
+
+
+
+SELECT * FROM ordertotals;
+START TRANSACTION;
+DELETE FROM ordertotals;
+SELECT * FROM ordertotals;
+ROLLBACK;
+SELECT * FROM ordertotals;
+
+
+START TRANSACTION;
+SAVEPOINT d0
+DELETE FROM ordertotals;
+
+DELETE FROM products;
+
+SAVEPOINT d1
+DELETE FROM orders WHERE order_num=20005 ;
+SAVEPOINT d2
+DELETE FROM orderitems;
+DELETE FROM orders;
+ROLLBACK TO d0;
+COMMIT;
+
+
+ROLLBACK TO d1;
+
+/*
+	总结：
+	savepoint保留点也在事务提交范围内，如果事务提交了，则不能使用savepoint保留点了。
+*/
+
+
+-- 第27章：全球化和本地化
+SHOW CHARACTER SET;
+SHOW COLLATION;
+
+
+SELECT * FROM customers ORDER BY lastname,firstname COLLATE latin1_general_cs ;
+
+
+
+-- 第28章：安全管理
+
+-- 创建账号
+CREATE USER ben IDENTIFIED BY 'p@$$wOrd';
+
+CREATE USER ben IDENTIFIED BY 'p@$$a';
+
+-- IDENTIFIED BY指定纯文本加密
+CREATE USER flkl IDENTIFIED BY '123';
+
+-- 删除账号
+DROP USER ben;
+
+SHOW GRANTS FOR hanhan;
+
+
+GRANT SELECT ON mytest.* TO flkl;
+
+
+-- 数据库维护
+ANALYZE TABLE orders;
+
+CHECK TABLE orders;
+
+-- 第18章：
+-- fulltext:估计类似于solr,有排名什么的，对于中文搜索不了；
+
+
+
+
